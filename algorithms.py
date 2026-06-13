@@ -530,6 +530,108 @@ class SimulatedAnnealingSolver(PuzzleSolver):
             return path, counter, self._generate_steps(path)
         return None, counter, ["Không tìm được đường đi (hết nhiệt độ)"]
 
+class AndOrGraphSolver(PuzzleSolver):
+    """
+    Thuật toán Tìm kiếm Đồ thị AND-OR (AND-OR Graph Search) 
+    Dành cho môi trường phức tạp/không tất định.
+    """
+    
+    def __init__(self, goal_state: tuple = GOAL_STATE):
+        super().__init__(goal_state)
+        self.counter = 0
+
+    def solve(self, start_state: tuple) -> Tuple[Optional[List[tuple]], int, List[str]]:
+        self.history = []
+        self.counter = 0
+        
+        # Chạy thuật toán chính theo mã giả
+        plan = self._or_search(start_state, [])
+        
+        if plan is None or plan == "failure":
+            return None, self.counter, ["Không tìm được kế hoạch (Failure)"]
+            
+        # Vì AND-OR sinh ra một cây kế hoạch (Plan Tree) thay vì một đường thẳng,
+        # Ta sẽ trích xuất một đường đi mẫu thành công từ cây kế hoạch để hiển thị lên UI.
+        path = self._extract_sample_path(start_state, plan)
+        return path, self.counter, self._generate_steps(path)
+
+    def _get_complex_results(self, state: tuple, neighbor: tuple) -> List[tuple]:
+        """
+        Giả lập môi trường phức tạp: Một hành động di chuyển (đến neighbor chính)
+        có khả năng bị tác động môi trường tạo ra thêm 1 trạng thái phụ ngẫu nhiên.
+        """
+        results = [neighbor]
+        # Tạo thêm 1 trạng thái nhiễu ngẫu nhiên từ các nút lân cận khác để làm môi trường "phức tạp"
+        all_neighbors = get_neighbors(state)
+        i = all_neighbors.index(neighbor)
+        if len(all_neighbors) > i :
+            extra_state = all_neighbors[(i + 1) % len(all_neighbors)]
+            if extra_state != state:
+                results.append(extra_state)
+        return list(set(results))  # Loại bỏ trùng lặp
+
+    def _or_search(self, state: tuple, path: list):
+        """Hàm OR_SEARCH theo mã giả"""
+        self.counter += 1
+        self.history.append(state)
+        
+        # if state ∈ problem.goal_test: return []
+        if state == self.goal_state:
+            return []
+            
+        # if state ∈ path: return failure
+        if state in path:
+            return "failure"
+            
+        # for each action in problem.actions(state):
+        for neighbor in get_neighbors(state):
+            # result_states = problem.results(state, action)
+            result_states = self._get_complex_results(state, neighbor)
+            
+            # plan = AND_SEARCH(result_states, problem, path + [state])
+            plan = self._and_search(result_states, path + [state])
+            
+            # if plan ≠ failure: return [action, plan]
+            if plan != "failure":
+                return {"action_to": neighbor, "plan_tree": plan}
+                
+        return "failure"
+
+    def _and_search(self, states: list, path: list):
+        """Hàm AND_SEARCH theo mã giả"""
+        # plans = empty mapping
+        plans = {}
+        
+        # for each s in states:
+        for s in states:
+            # plan_s = OR_SEARCH(s, problem, path)
+            plan_s = self._or_search(s, path)
+            
+            # if plan_s == failure: return failure
+            if plan_s == "failure":
+                return "failure"
+                
+            plans[s] = plan_s
+            
+        return plans
+
+    def _extract_sample_path(self, start_state: tuple, plan) -> List[tuple]:
+        """Trích xuất một đường đi từ cây kế hoạch AND-OR để vẽ lên giao diện"""
+        path = [start_state]
+        curr = plan
+        curr_state = start_state
+        
+        while curr and isinstance(curr, dict) and "action_to" in curr:
+            next_state = curr["action_to"]
+            path.append(next_state)
+            
+            # Đi tiếp vào nhánh của trạng thái này trong cây AND
+            plan_tree = curr["plan_tree"]
+            if isinstance(plan_tree, dict) and next_state in plan_tree:
+                curr = plan_tree[next_state]
+            else:
+                break
+        return path
 # ============================================================================
 # FACTORY
 # ============================================================================
@@ -546,6 +648,7 @@ def create_solver(algorithm: str, goal_state: tuple = GOAL_STATE, heuristic: str
     elif algorithm == "simulated_annealing": return SimulatedAnnealingSolver(goal_state=goal_state, heuristic=heuristic)
     elif algorithm == "random_restart": return RandomRestartSolver(goal_state=goal_state)
     elif algorithm == "beam_search": return BeamSearchSolver(goal_state=goal_state)
+    elif algorithm == "and-or_graph": return AndOrGraphSolver(goal_state=goal_state)
     else: raise ValueError(f"Unknown algorithm: {algorithm}")
 
 ALGORITHMS = {
@@ -558,7 +661,8 @@ ALGORITHMS = {
     "Hill Climbing": "Hill Climbing",
     "Simulated Annealing": "Simulated Annealing",
     "Random Restart": "Random Restart",
-    "Beam Search": "Beam Search"
+    "Beam Search": "Beam Search",
+    "AND-OR Graph": "AND-OR Graph Search"
 }
 HEURISTICS = {"Manhattan": "manhattan", "Misplaced Tiles": "misplaced"}
 VARIANTS = {"Simple": "simple", "Steepest": "steepest"}
